@@ -39,7 +39,8 @@ do
   if [ $ITER = $SLURM_ARRAY_TASK_ID ]
   then
     echo $ITER $CFG_FILE $SEED $NOISE_TYPE $SPLIT_DATASET
-    python ce_baseline_copy.py > logs/my_log.log
+    python ce_baseline_copy.py --noise_type aggre --n_epoch 4 > logs/my_new_log.log
+    python learning.py --noise_type aggre > logs/my_new_log_learning_py.log
   fi
   ITER=$(($ITER+1))
 done

@@ -15,7 +15,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--lr', type=float, default=0.02)
 parser.add_argument('--val_ratio', type=float, default=0.0)
 parser.add_argument('--noise_type', type=str, help='clean, aggre, worst, rand1, rand2, rand3, clean100, noisy100',
-                    default='aggre')
+                    default='clean')
 parser.add_argument('--noise_path', type=str, help='path of CIFAR-10_human.pt', default=None)
 parser.add_argument('--dataset', type=str, help=' cifar10 or cifar100', default='cifar10')
 parser.add_argument('--n_epoch', type=int, default=300)
@@ -38,6 +38,8 @@ parser.add_argument('--stop_after_overfitting', type=bool, default=False)
 parser.add_argument('--divide_dataset', type=bool, default=True)
 parser.add_argument('--split_dataset', type=str, default='otsu_thresh', help='otsu_thresh, otsu_up_mean')
 parser.add_argument('--correct_labels', type=bool, default=True)
+parser.add_argument('--clean_test_freq', type=int, default=1, help='how often the current model performance on clean data will be displayed')
+parser.add_argument('--save_model_freq', type=int, default=2, help='freq for saving state of models. will be auto saved at end of training')
 args = parser.parse_args()
 
 
@@ -73,9 +75,9 @@ args = parser.parse_args()
 
 
 def my_train(current_epoch, teacher, optimizer_teacher, dataloader, student, optimizer_student):
-    # teacher.train()
-    # student.train()
-    num_iter = (len(dataloader.dataset)//dataloader.batch_size)+1
+    teacher.train()
+    student.train()
+    # num_iter = (len(dataloader.dataset)//dataloader.batch_size)+1
     for batch_idx, (img, target, index) in enumerate(dataloader):
         img = img.to(args.device)
         target = target.to(args.device)
@@ -83,8 +85,6 @@ def my_train(current_epoch, teacher, optimizer_teacher, dataloader, student, opt
 
         # Load modified labels
         if current_epoch == 0:
-            print(f'img: {img.device}')
-            print(f'corrected_target: {corrected_target.device}')
             one_hot = F.one_hot(target, n_class).float()
             corrected_target[index] = target.detach()
             corrected_target_one_hot[index] = one_hot.detach()
@@ -155,18 +155,13 @@ def my_train(current_epoch, teacher, optimizer_teacher, dataloader, student, opt
         optimizer_teacher.step()
         optimizer_teacher.zero_grad()
 
-
-        # sys.stdout.write('%s:%.1f-%s | Epoch [%3d/%3d] Iter[%3d/%3d]\t CE-loss: %.4f \t l2-loss: %.4f'
-        #                  % (args.dataset, args.r, args.cifar_n_mode, epoch, args.num_epochs, batch_idx + 1, num_iter,
-        #                     naive_loss.item(), compensation_loss.item()))
+        # sys.stdout.write('\r')
+        # sys.stdout.write(
+        #     f"Epoch: {current_epoch:3.0f}/{args.n_epoch - 1:3.0f}\tIter: {batch_idx:3.0f}/{len(train_dataset) // batch_size - 1:3.0f}\tLoss: {loss['loss']:8.5f}\tnaive_loss: {loss['ce']:8.5f}\tcompensation_l2_loss: {loss['compensation_l2']:8.5f}\n")
         # sys.stdout.flush()
 
-        #sys.stdout.write('\r')
-        sys.stdout.write(
-            f"Epoch: {current_epoch:3.0f}/{args.n_epoch - 1:3.0f}\tIter: {batch_idx:3.0f}/{len(train_dataset) // batch_size - 1:3.0f}\tLoss: {loss['loss']:8.5f}\tnaive_loss: {loss['ce']:8.5f}\tcompensation_l2_loss: {loss['compensation_l2']:8.5f}\n")
-        sys.stdout.flush()
-
-    return loss
+        print(f"\rEpoch: {current_epoch:3.0f}/{args.n_epoch - 1:3.0f}\tIter: {batch_idx:3.0f}/{len(train_dataset) // batch_size - 1:3.0f}\tLoss: {loss['loss']:8.5f}\tnaive_loss: {loss['ce']:8.5f}\tcompensation_l2_loss: {loss['compensation_l2']:8.5f}", end='', flush=False)
+    print()
 
 
 def on_epoch_end(current_epoch, is_true_label, otsu_thresh, otsu_mu2, p_overfitting, overfitting_epoch):
@@ -252,29 +247,26 @@ def on_epoch_end(current_epoch, is_true_label, otsu_thresh, otsu_mu2, p_overfitt
 #     return acc
 
 # Evaluate the Model
-def my_evaluate(loader, model, save=False, best_acc=0.0):
-    model.eval()  # Change model to 'eval' mode.
+# Test the Model on clean test_data -- acc not used for algorithm
+def my_evaluate(loader, _teacher, _student):
+    _teacher.eval()
+    _student.eval()
 
     correct = 0
     total = 0
     for images, labels, _ in loader:
         images = Variable(images).to(args.device)
-        logits = model(images)
-        outputs = F.softmax(logits, dim=1)
-        _, pred = torch.max(outputs.data, 1)
+        _pred_teacher = _teacher(images)
+        _pred_student = _student(images)
+        p_teacher = _pred_teacher.softmax(dim=1)
+        p_student = _pred_student.softmax(dim=1)
+        p_agree = p_teacher * p_student
+        p_agree = p_agree / p_agree.sum(dim=1, keepdims=True)
+        p_id_agree = torch.argmax(p_agree, dim=1)
+
         total += labels.size(0)
-        correct += (pred.cpu() == labels).sum()
+        correct += (p_id_agree.cpu() == labels).sum()
     acc = 100 * float(correct) / float(total)
-    if save:
-        if acc > best_acc:
-            state = {'state_dict': model.state_dict(),
-                     'epoch': epoch,
-                     'acc': acc,
-                     }
-            save_path = os.path.join('./', args.dataset + '_' + args.noise_type + 'best.pth.tar')
-            torch.save(state, save_path)
-            best_acc = acc
-            print(f'model saved to {save_path}!')
 
     return acc
 
@@ -316,6 +308,22 @@ def otsu(p):
     return mu2, sigma2, mu1, sigma1, s
 
 
+def save_models(teacher, student):
+    # save state of teacher
+    state_teacher = {'state_dict': teacher.state_dict(),
+                     'epoch': epoch
+                     }
+    save_path_teacher = os.path.join('./', args.dataset + '_' + args.noise_type + '_teacher.pth.tar')
+    torch.save(state_teacher, save_path_teacher)
+
+    # save state of student
+    state_student = {'state_dict': student.state_dict(),
+                     'epoch': epoch
+                     }
+    save_path_student = os.path.join('./', args.dataset + '_' + args.noise_type + '_student.pth.tar')
+    torch.save(state_student, save_path_student)
+
+
 ##################################### main code ################################################
 
 # Seed
@@ -345,10 +353,15 @@ elif args.dataset=='cifar100':
     warm_up = 30
 
 train_dataset, val_dataset, test_dataset, n_class, num_training_samples = input_dataset(args.dataset,
-                                                                                        args.noise_type,
-                                                                                        args.noise_path,
-                                                                                        is_human=True,
-                                                                                        val_ratio=args.val_ratio)
+                                                                             args.noise_type,
+                                                                             args.noise_path,
+                                                                             is_human=True,
+                                                                             val_ratio=args.val_ratio)
+# _, _, test_dataset, _, _ = input_dataset(args.dataset,
+#                                          'clean',
+#                                          args.noise_path,
+#                                          is_human=True,
+#                                          val_ratio=args.val_ratio)
 # print('train_labels:', len(train_dataset.train_labels), train_dataset.train_labels[:10])
 # load model
 print('building model...')
@@ -411,7 +424,7 @@ stop_after_overfitting = False
 use_for_training = torch.ones(50000).long().to(args.device)
 
 
-train_acc = 0.0
+test_acc = 0.0
 best_acc = 0.0
 # training
 for epoch in range(args.n_epoch):
@@ -426,21 +439,17 @@ for epoch in range(args.n_epoch):
     for param_group in optimizer_student.param_groups:
         param_group['lr'] = lr
 
-    # if not is_overfitted:
-    #     # warum-up training pre overfitting-epoch without bootstrapping
-    #     warmup_trainloader = loader.run('warmup')
-    #     print('warm up')
-    #     warmup(epoch, teacher, optimizer_teacher, warmup_trainloader, student, optimizer_student)
-    # else:
-    #     # training post overfitting-epoch with bootstrapping
-    #     pass
-
     my_train(epoch, teacher, optimizer_teacher, train_loader, student, optimizer_student)
     is_true_label, otsu_thresh, otsu_mu2, p_overfitting, overfitting_epoch = on_epoch_end(epoch, is_true_label, otsu_thresh, otsu_mu2, p_overfitting, overfitting_epoch)
 
-    # if overfitting_epoch and otsu_thresh is None:
-    #     mu2, sigma2, mu1, sigma1, thresh = otsu(p_agree)
+    if epoch % args.clean_test_freq == 0 or epoch == args.n_epoch - 1:
+        test_acc = my_evaluate(test_loader, teacher, student)
+        if test_acc > best_acc:
+            best_acc = test_acc
+        print(f'epoch: {epoch}\t acc on clean test_data: {test_acc}\tbest: {best_acc}')
 
+    if epoch % args.save_model_freq == 0 or epoch == args.n_epoch - 1:
+        save_models(teacher, student)
 
     # # train models
     # train_acc = train(epoch, train_loader, model, optimizer)
@@ -460,3 +469,5 @@ for epoch in range(args.n_epoch):
     print(
         f'[Epoch {epoch}] Time elapsed {time_elapsed // 3600:.0f}h {(time_elapsed % 3600) // 60:.0f}m {(time_elapsed % 3600) % 60:.0f}s',
         flush=True)
+
+

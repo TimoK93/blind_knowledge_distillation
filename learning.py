@@ -56,32 +56,38 @@ def train(epoch, train_loader, model, optimizer):
     return train_acc
 
 # Evaluate the Model
-def evaluate(loader, model, save = False, best_acc = 0.0):
-    model.eval()    # Change model to 'eval' mode.
+def evaluate(loader, teacher, student, save=False, best_acc = 0.0):
+    teacher.eval()
+    student.eval()
     
     correct = 0
     total = 0
     for images, labels, _ in loader:
         images = Variable(images).to(args.device)
-        logits = model(images)
-        outputs = F.softmax(logits, dim=1)
-        _, pred = torch.max(outputs.data, 1)
+        #logits = model(images)
+        pred_teacher = teacher(images)
+        pred_student = student(images)
+        p_teacher = pred_teacher.softmax(dim=1)
+        p_student = pred_student.softmax(dim=1)
+        p_agree = p_teacher * p_student
+        p_agree = p_agree / p_agree.sum(dim=1, keepdims=True)
+        p_id_agree = torch.argmax(p_agree, dim=1)
+
         total += labels.size(0)
-        correct += (pred.cpu() == labels).sum()
+        correct += (p_id_agree.cpu() == labels).sum()
     acc = 100*float(correct)/float(total)
-    if save:
-        if acc > best_acc:
-            state = {'state_dict': model.state_dict(),
-                     'epoch':epoch,
-                     'acc':acc,
-            }
-            save_path= os.path.join('./', args.noise_type +'best.pth.tar')
-            torch.save(state,save_path)
-            best_acc = acc
-            print(f'model saved to {save_path}!')
+    # if save:
+    #     if acc > best_acc:
+    #         state = {'state_dict': model.state_dict(),
+    #                  'epoch':epoch,
+    #                  'acc':acc,
+    #         }
+    #         save_path= os.path.join('./', args.noise_type +'best.pth.tar')
+    #         torch.save(state,save_path)
+    #         best_acc = acc
+    #         print(f'model saved to {save_path}!')
 
     return acc
-
 
 ##################################### main code ################################################
 args = parser.parse_args()
@@ -103,27 +109,26 @@ if args.noise_path is None:
     else: 
         raise NameError(f'Undefined dataset {args.dataset}')
 
-
 _, _, test_dataset, num_classes, num_training_samples = input_dataset(args.dataset,args.noise_type, args.noise_path, is_human = True, val_ratio = args.val_ratio)
 # load model
 print('building model...')
-model = ResNet34(num_classes)
+teacher = PreResNet18(num_classes)
+teacher.to(args.device)
+student = PreResNet18(num_classes)
+student.to(args.device)
 print('building model done')
 
-
-
 test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
-                                  batch_size = 64,
-                                  num_workers=args.num_workers,
-                                  shuffle=False)
-
-
-
+                                          batch_size=64,
+                                          num_workers=args.num_workers,
+                                          shuffle=False)
 
 # we will test the model by the following code
-state_dict = torch.load(f"./{args.dataset}_{args.noise_type}best.pth.tar", map_location = "cpu")
-model.load_state_dict(state_dict['state_dict'])
-model.to(args.device)
-test_acc = evaluate(loader=test_loader, model=model, save = False)
+state_dict_teacher = torch.load(f"./{args.dataset}_{args.noise_type}_teacher.pth.tar", map_location = "cpu")
+teacher.load_state_dict(state_dict_teacher['state_dict'])
+teacher.to(args.device)
+state_dict_student=torch.load(f"./{args.dataset}_{args.noise_type}_student.pth.tar", map_location = "cpu")
+student.load_state_dict(state_dict_teacher['state_dict'])
+student.to(args.device)
+test_acc = evaluate(loader=test_loader, teacher=teacher, student=student, save=False)
 print(f'Best test acc selected by val is {test_acc}')
-
