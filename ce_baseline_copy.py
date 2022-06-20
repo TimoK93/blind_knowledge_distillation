@@ -101,9 +101,9 @@ def my_train(current_epoch, teacher, optimizer_teacher, dataloader, student, opt
 
         naive_loss = F.cross_entropy(pred_teacher, target, reduction="none").mean()
 
-        compensation_loss.backward()
-        optimizer_student.step()
-        optimizer_student.zero_grad()
+        # compensation_loss.backward()
+        # optimizer_student.step()
+        # optimizer_student.zero_grad()
 
         naive_loss.backward()
         optimizer_teacher.step()
@@ -145,6 +145,7 @@ def my_evaluate(loader, teacher, student):
         p_student = pred_student.softmax(dim=1)
         p_agree = p_teacher * p_student
         p_agree = p_agree / p_agree.sum(dim=1, keepdims=True)
+        #p_agree = p_teacher
         p_id_agree = torch.argmax(p_agree, dim=1)
 
         total += labels.size(0)
@@ -247,7 +248,7 @@ student = PreResNet18(n_class)
 student.to(args.device)
 
 print('building model done')
-optimizer_teacher = torch.optim.SGD(teacher.parameters(), lr=learning_rate, momentum=args.momentum,
+optimizer_teacher = torch.optim.SGD(list(teacher.parameters())+ list(student.parameters()), lr=learning_rate, momentum=args.momentum,
                                     weight_decay=args.weight_decay)
 optimizer_student = torch.optim.SGD(student.parameters(), lr=learning_rate, momentum=args.momentum,
                                     weight_decay=args.weight_decay)
@@ -291,8 +292,8 @@ for epoch in range(args.n_epoch):
         lr /= 10
     for param_group in optimizer_teacher.param_groups:
         param_group['lr'] = lr
-    for param_group in optimizer_student.param_groups:
-        param_group['lr'] = lr
+    #for param_group in optimizer_student.param_groups:
+    #    param_group['lr'] = lr
 
     # Train epoch and collect values for latter overfitting epoch calculation
     avg_max_pred_student, prob_teacher, prob_student, prob_agreement = my_train(
