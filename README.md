@@ -1,3 +1,8 @@
+``
+ conda install -c nvidia/label/cuda-11.3.1 cuda-toolkit 
+``
+
+
 # 1st Learning with Noisy Labels Challenge
 Table of Contents
 =================

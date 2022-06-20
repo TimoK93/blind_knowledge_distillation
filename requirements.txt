@@ -5,3 +5,4 @@ psutil
 requests
 progress
 numpy
+torchvision

@@ -1,5 +1,5 @@
 # -*- coding:utf-8 -*-
-
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.autograd import Variable
@@ -43,109 +43,63 @@ parser.add_argument('--save_model_freq', type=int, default=2, help='freq for sav
 args = parser.parse_args()
 
 
-# # Train the Model
-# def train(epoch, train_loader, model, optimizer):
-#     train_total = 0
-#     train_correct = 0
-#     model.train()
-#     for i, (images, labels, indexes) in enumerate(train_loader):
-#
-#         batch_size = indexes.shape[0]
-#
-#         images = images.to(args.device)
-#         labels = labels.to(args.device)
-#
-#         # Forward + Backward + Optimize
-#         logits = model(images)
-#
-#         prec, _ = accuracy(logits, labels, topk=(1, 5))
-#         train_total += 1
-#         train_correct += prec
-#         loss = F.cross_entropy(logits, labels, reduce=True)
-#
-#         optimizer.zero_grad()
-#         loss.backward()
-#         optimizer.step()
-#         if (i + 1) % args.print_freq == 0:
-#             print('Epoch [%d/%d], Iter [%d/%d] Training Accuracy: %.4F, Loss: %.4f'
-#                   % (epoch + 1, args.n_epoch, i + 1, len(train_dataset) // batch_size, prec, loss.data))
-#
-#     train_acc = float(train_correct) / float(train_total)
-#     return train_acc
-
-
-def my_train(current_epoch, teacher, optimizer_teacher, dataloader, student, optimizer_student):
+def my_train(current_epoch, teacher, optimizer_teacher, dataloader, student, optimizer_student, group_1, group_2, group_3, group_4):
     teacher.train()
     student.train()
-    # num_iter = (len(dataloader.dataset)//dataloader.batch_size)+1
+    prob_teacher_container, prob_student_container, prob_agree_container = \
+        torch.zeros((len(dataloader.dataset))).to(args.device), \
+        torch.zeros((len(dataloader.dataset))).to(args.device),\
+        torch.zeros((len(dataloader.dataset))).to(args.device)
+    mean_max_student_prediction = 0
+    number_of_samples = 0
     for batch_idx, (img, target, index) in enumerate(dataloader):
         img = img.to(args.device)
         target = target.to(args.device)
-        loss = dict(loss=0)
 
         # Load modified labels
-        if current_epoch == 0:
-            one_hot = F.one_hot(target, n_class).float()
-            corrected_target[index] = target.detach()
-            corrected_target_one_hot[index] = one_hot.detach()
-            original_target[index] = target.detach()
-        else:
-            target = corrected_target[index]
-
         img, target = img.to(args.device), target.to(args.device)
-        _pred_teacher = teacher(img)
-        _pred_student = student(img)
+        pred_teacher = teacher(img)
+        pred_student = student(img)
 
         one_hot = F.one_hot(target, n_class).float()
-        _is_true_label = is_true_label[index]
-        _use_for_training = use_for_training[index]
-        if _use_for_training.sum() == 0:
-            _use_for_training[0:round(_use_for_training.shape[0] / 2)] = 1
 
-        # pred_error = pred_teacher.detach().clone() - pred_student
-        pred_error = _pred_teacher.detach().clone() - _pred_student
-        positives = _pred_teacher > 0
-        pred_error *= positives
+        pred_error = pred_teacher.detach().clone() - pred_student
+        #positives = pred_teacher > 0
+        #pred_error *= positives
         one_cold = 1 - one_hot
         pred_error *= one_cold
-        pred_error *= _use_for_training[:, None]
         # loss for student network
-        compensation_loss = pred_error.pow(2).sum() / (_use_for_training.sum() * (n_class - 1))
-        loss["compensation_l2"] = compensation_loss
-        loss["loss"] += compensation_loss
+        compensation_loss = pred_error.pow(2).sum() / (target.shape[0] * n_class - 1)
 
-        alpha = current_epoch / args.n_epoch
-        alpha = min(alpha + 0.2, args.alpha_final)
-        if not overfitting_epoch:
-            alpha = 0.0
-        prob_student = _pred_student.softmax(dim=1)
-        balance = alpha * torch.ones_like(_is_true_label)
-        if overfitting_epoch:
-            # Bootstrap target
-            if is_true_label.sum() > 0:
-                # balance = 1 - self.is_true_label[index]
-                if args.trusted_to_0:
-                    balance = torch.where(_is_true_label == 1, torch.zeros_like(balance), balance)
-                if args.untrusted_to_1 and not args.incremental_label_correction:
-                    balance = torch.where(_is_true_label == 0, torch.ones_like(balance), balance)
-            if args.incremental_label_correction:
-                _one_hot = one_hot
-                _one_hot[_is_true_label == 0] = corrected_target_one_hot[index].clone()[is_true_label == 0]
-            else:
-                _one_hot = one_hot
-            bootstrapped_target = (1 - balance[:, None]) * _one_hot + balance[:, None] * prob_student
+        prob_student = pred_student.softmax(dim=1)
+        prob_teacher = pred_teacher.softmax(dim=1)
+        prob_agree = prob_teacher * prob_student
+        prob_agree = prob_agree / prob_agree.sum(dim=1, keepdims=True)
+        prob_teacher_container[index], prob_student_container[index], prob_agree_container[index] = \
+            prob_teacher[torch.arange(target.numel()).to(target.device), target].detach(),\
+            prob_student[torch.arange(target.numel()).to(target.device), target].detach(), \
+            prob_agree[torch.arange(target.numel()).to(target.device), target].detach()
+
+        max_student_prediction = prob_student.max(dim=1)[0].detach()
+        mean_max_student_prediction += max_student_prediction.sum()
+        number_of_samples += max_student_prediction.numel()
+
+        if group_1 is not None:
+            # Robust training
+            balance = torch.ones_like(target).float()
+            balance[group_1[index]] = 0.7
+            balance[group_2[index]] = 0.55
+            balance[group_3[index]] = 0.45
+            balance[group_4[index]] = 0.3
+            robust_target = (1 - balance[:, None]) * one_hot + balance[:, None] * prob_student.detach().clone()
             # Force the network to minimize Entropy
-            bootstrapped_target = bootstrapped_target.pow(1 + alpha)
-            _target = bootstrapped_target / bootstrapped_target.sum(dim=1, keepdims=True)
+            robust_target = robust_target.pow(1 + balance[:, None])
+            target = robust_target / robust_target.sum(dim=1, keepdims=True)
         else:
-            _target = one_hot
-        if args.incremental_label_correction:
-            corrected_target_one_hot[index] = 0.95 * corrected_target_one_hot[index].detach() + 0.05 * _target.detach()
-        _pred_teacher, __target = _pred_teacher[_use_for_training == 1], _target[_use_for_training == 1]
-        naive_loss = F.cross_entropy(_pred_teacher, __target, reduction="none",
-                                     label_smoothing=args.label_smoothing).mean()
-        loss["ce"] = naive_loss
-        loss["loss"] += naive_loss
+            # Standard CE training
+            target = one_hot
+
+        naive_loss = F.cross_entropy(pred_teacher, target, reduction="none").mean()
 
         compensation_loss.backward()
         optimizer_student.step()
@@ -155,111 +109,40 @@ def my_train(current_epoch, teacher, optimizer_teacher, dataloader, student, opt
         optimizer_teacher.step()
         optimizer_teacher.zero_grad()
 
-        # sys.stdout.write('\r')
-        # sys.stdout.write(
-        #     f"Epoch: {current_epoch:3.0f}/{args.n_epoch - 1:3.0f}\tIter: {batch_idx:3.0f}/{len(train_dataset) // batch_size - 1:3.0f}\tLoss: {loss['loss']:8.5f}\tnaive_loss: {loss['ce']:8.5f}\tcompensation_l2_loss: {loss['compensation_l2']:8.5f}\n")
-        # sys.stdout.flush()
-
-        print(f"\rEpoch: {current_epoch:3.0f}/{args.n_epoch - 1:3.0f}\tIter: {batch_idx:3.0f}/{len(train_dataset) // batch_size - 1:3.0f}\tLoss: {loss['loss']:8.5f}\tnaive_loss: {loss['ce']:8.5f}\tcompensation_l2_loss: {loss['compensation_l2']:8.5f}", end='', flush=False)
+        print(f"\rEpoch: {current_epoch:3.0f}/{args.n_epoch - 1:3.0f}\tIter: {batch_idx:3.0f}/{len(train_dataset) // batch_size - 1:3.0f}\tnaive_loss: {naive_loss:8.5f}\tcompensation_l2_loss: {compensation_loss:8.5f}", end='', flush=False)
     print()
+    # New values not necessary -> return None values
+    if group_1 is not None:
+        return None, None, None, None
+    # Return statistics for overfitting epoch calculation
+    mean_max_student_prediction = mean_max_student_prediction / number_of_samples
+    return mean_max_student_prediction, prob_teacher_container, prob_student_container, prob_agree_container
 
-
-def on_epoch_end(current_epoch, is_true_label, otsu_thresh, otsu_mu2, p_overfitting, overfitting_epoch):
-    if not args.training:
-        return is_true_label, otsu_thresh, otsu_mu2, p_overfitting, overfitting_epoch
+def split_dataset(p):
     # Convert logits to probabilities
-    p_teacher = pred_teacher.softmax(dim=1)
-    p_id_teacher = torch.argmax(p_teacher, dim=1)
-    p_student = pred_student.softmax(dim=1)
-    p_agree = p_teacher * p_student
-    p_agree = p_agree / p_agree.sum(dim=1, keepdims=True)
-    p_gt_agree = p_agree[torch.arange(corrected_target.numel()), corrected_target]
-    p_id_student = torch.argmax(p_student, dim=1)
-    p_id_agree = torch.argmax(p_agree, dim=1)
-    # Calculate average max prediction of student
-    max_p_comp = p_student.max(dim=1)[0].mean().detach()
-    avg_max_pred_student.append(max_p_comp)
-
+    up_mean, up_sigma, lo_mean, lo_sigma, thresh = otsu(p)
     # Search if we are in overfitting region
-    if not overfitting_epoch:
-        overfitting_epoch = detect_overfitting_epoch(avg_max_pred_student)
-        if overfitting_epoch:
-            # Calculate Otsu
-            _p_teacher = pred_teacher_hist[overfitting_epoch].softmax(dim=1)
-            _p_student = pred_student_hist[overfitting_epoch].softmax(dim=1)
-            _p_agree = _p_teacher * _p_student
-            _p_agree = _p_agree / _p_agree.sum(dim=1, keepdims=True)
-            _p_gt_agree = _p_agree[torch.arange(corrected_target.numel()), corrected_target]
-            up_mean, up_sigma, lo_mean, lo_sigma, thresh = otsu(_p_gt_agree)
-            otsu_thresh, otsu_mu2 = thresh, up_mean
-            p_overfitting = _p_gt_agree.clone()
-            if args.stop_after_overfitting:
-                trainer_should_stop = True
-            print("up_mean, up_sigma, lo_mean, lo_sigma, thresh", up_mean, up_sigma, lo_mean, lo_sigma, thresh)
+    group_1 = p < lo_mean
+    group_2 = ~group_1 * (p < thresh)
+    group_4 = p >= up_mean
+    group_3 = ~group_4 * (p >= thresh)
+    return group_1, group_2, group_3, group_4
 
-    # Perform label correction
-    if not args.divide_dataset or not overfitting_epoch:
-        return is_true_label, otsu_thresh, otsu_mu2, p_overfitting, overfitting_epoch
-    # Split dataset in save and unsafe data for the first time
-    if is_true_label.sum() == 0:
-        if args.split_dataset == 'otsu_thresh':
-            is_true_label = (p_gt_agree >= otsu_thresh) * 1
-        elif args.split_dataset == 'otsu_up_mean':
-            is_true_label = (p_gt_agree >= otsu_mu2) * 1
-        else:
-            raise Exception('no valid argument for split_dataset')
-        if args.incremental_label_correction and args.incremental_label_correction_label_reset:
-            corrected_target_one_hot[is_true_label] = 1 / n_class
-    if not args.correct_labels or not overfitting_epoch:
-        return is_true_label, otsu_thresh, otsu_mu2, p_overfitting, overfitting_epoch
-    # Correct data for unsafe labels and detect new save objects
-    if (current_epoch % 5) == 0 and current_epoch > 0 and otsu_thresh is not None:
-        # Find labels that should be modified
-        is_true_label[is_true_label == 0] = (p_gt_agree[is_true_label == 0] >= otsu_mu2) * 1
-    return is_true_label, otsu_thresh, otsu_mu2, p_overfitting, overfitting_epoch
-
-
-# # Evaluate the Model
-# def evaluate(loader, model, save=False, best_acc=0.0):
-#     model.eval()  # Change model to 'eval' mode.
-#
-#     correct = 0
-#     total = 0
-#     for images, labels, _ in loader:
-#         images = Variable(images).to(args.device)
-#         logits = model(images)
-#         outputs = F.softmax(logits, dim=1)
-#         _, pred = torch.max(outputs.data, 1)
-#         total += labels.size(0)
-#         correct += (pred.cpu() == labels).sum()
-#     acc = 100 * float(correct) / float(total)
-#     if save:
-#         if acc > best_acc:
-#             state = {'state_dict': model.state_dict(),
-#                      'epoch': epoch,
-#                      'acc': acc,
-#                      }
-#             save_path = os.path.join('./', args.dataset + '_' + args.noise_type + 'best.pth.tar')
-#             torch.save(state, save_path)
-#             best_acc = acc
-#             print(f'model saved to {save_path}!')
-#
-#     return acc
 
 # Evaluate the Model
 # Test the Model on clean test_data -- acc not used for algorithm
-def my_evaluate(loader, _teacher, _student):
-    _teacher.eval()
-    _student.eval()
+def my_evaluate(loader, teacher, student):
+    teacher.eval()
+    student.eval()
 
     correct = 0
     total = 0
     for images, labels, _ in loader:
         images = Variable(images).to(args.device)
-        _pred_teacher = _teacher(images)
-        _pred_student = _student(images)
-        p_teacher = _pred_teacher.softmax(dim=1)
-        p_student = _pred_student.softmax(dim=1)
+        pred_teacher = teacher(images)
+        pred_student = student(images)
+        p_teacher = pred_teacher.softmax(dim=1)
+        p_student = pred_student.softmax(dim=1)
         p_agree = p_teacher * p_student
         p_agree = p_agree / p_agree.sum(dim=1, keepdims=True)
         p_id_agree = torch.argmax(p_agree, dim=1)
@@ -275,6 +158,7 @@ def detect_overfitting_epoch(x):
     """ Detects the maximal average max likelihood of the student. This should be the start of overfitting """
     if len(x) < 6:
         return False
+    return 4
     for i in range(2, len(x) - 2):
         if x[i] > x[i - 1] and x[i] > x[i - 2] and x[i] > x[i + 1] and x[i] > x[i + 2]:
             return i
@@ -357,13 +241,6 @@ train_dataset, val_dataset, test_dataset, n_class, num_training_samples = input_
                                                                              args.noise_path,
                                                                              is_human=True,
                                                                              val_ratio=args.val_ratio)
-# _, _, test_dataset, _, _ = input_dataset(args.dataset,
-#                                          'clean',
-#                                          args.noise_path,
-#                                          is_human=True,
-#                                          val_ratio=args.val_ratio)
-# print('train_labels:', len(train_dataset.train_labels), train_dataset.train_labels[:10])
-# load model
 print('building model...')
 teacher = PreResNet18(n_class)
 teacher.to(args.device)
@@ -376,10 +253,6 @@ optimizer_teacher = torch.optim.SGD(teacher.parameters(), lr=learning_rate, mome
 optimizer_student = torch.optim.SGD(student.parameters(), lr=learning_rate, momentum=args.momentum,
                                     weight_decay=args.weight_decay)
 
-# CE = nn.CrossEntropyLoss(reduction='none')
-# CE_loss = nn.CrossEntropyLoss()
-
-# all_loss = [[], []]  # save the history of losses from two networks
 
 train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
                                            batch_size=batch_size,
@@ -397,32 +270,15 @@ test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
                                           shuffle=False)
 
 
-
-alpha_plan = [0.1] * 50 + [0.01] * 50
-# Annotations container
-original_target = -torch.ones(50000).long().to(args.device)
-corrected_target = -torch.ones(50000).long().to(args.device)
-corrected_target_one_hot = -torch.ones(50000, n_class).float().to(args.device)
-corrected_target_hist = torch.zeros((args.n_epoch, 50000)).long().to(args.device)
 # Prediction container
-pred_teacher = torch.zeros((50000, n_class)).float().to(args.device)
-pred_student = torch.zeros((50000, n_class)).float().to(args.device)
-pred_teacher_hist = torch.zeros((args.n_epoch, 50000, n_class)).float().to(args.device)
-pred_student_hist = torch.zeros((args.n_epoch, 50000, n_class)).float().to(args.device)
-is_true_label = torch.zeros(50000).float().to(args.device)
+prob_teacher_hist = list()
+prob_student_hist = list()
+prob_agreement_hist = list()
 # Average max likelihood
-avg_max_pred_student = list()
+avg_max_pred_student_hist = list()
 # Epoch in which overfitting starts
-overfitting_epoch = False
-# Otsu threshold
-otsu_thresh, otsu_mu2 = None, None
-# Probabilities at the overfitting epoch
-p_overfitting = None
-# flag to perform early stopping
-stop_after_overfitting = False
-# flag to randomly deactivate samples in the training
-use_for_training = torch.ones(50000).long().to(args.device)
-
+overfitting_epoch = None
+group_1, group_2, group_3, group_4 = None, None, None, None
 
 test_acc = 0.0
 best_acc = 0.0
@@ -439,8 +295,19 @@ for epoch in range(args.n_epoch):
     for param_group in optimizer_student.param_groups:
         param_group['lr'] = lr
 
-    my_train(epoch, teacher, optimizer_teacher, train_loader, student, optimizer_student)
-    is_true_label, otsu_thresh, otsu_mu2, p_overfitting, overfitting_epoch = on_epoch_end(epoch, is_true_label, otsu_thresh, otsu_mu2, p_overfitting, overfitting_epoch)
+    # Train epoch and collect values for latter overfitting epoch calculation
+    avg_max_pred_student, prob_teacher, prob_student, prob_agreement = my_train(
+        epoch, teacher, optimizer_teacher, train_loader, student, optimizer_student, group_1, group_2, group_3, group_4)
+    avg_max_pred_student_hist.append(avg_max_pred_student)
+    prob_teacher_hist.append(prob_teacher)
+    prob_student_hist.append(prob_student)
+    prob_agreement_hist.append(prob_agreement)
+    # Check if overfitting epoch needs to be predicted
+    if not overfitting_epoch:
+        overfitting_epoch = detect_overfitting_epoch(avg_max_pred_student_hist)
+        if overfitting_epoch:
+            group_1, group_2, group_3, group_4 = split_dataset(prob_agreement_hist[overfitting_epoch])
+            np.save('detection.npy', (group_1 == 1).cpu().numpy())
 
     if epoch % args.clean_test_freq == 0 or epoch == args.n_epoch - 1:
         test_acc = my_evaluate(test_loader, teacher, student)
@@ -451,19 +318,6 @@ for epoch in range(args.n_epoch):
     if epoch % args.save_model_freq == 0 or epoch == args.n_epoch - 1:
         save_models(teacher, student)
 
-    # # train models
-    # train_acc = train(epoch, train_loader, model, optimizer)
-    # print('train acc is ', train_acc)
-    # # evaluate models
-    # print('previous_best', best_acc)
-    # if args.val_ratio > 0.0:
-    #     # save results
-    #     val_acc = evaluate(loader=val_loader, model=model, save=True, best_acc=best_acc)
-    #     if val_acc > best_acc:
-    #         best_acc = val_acc
-    #     print('validation acc is ', val_acc)
-    # test_acc = evaluate(loader=test_loader, model=model, save=False, best_acc=best_acc)
-    # print('test acc is ', test_acc)
     time_curr = time.time()
     time_elapsed = time_curr - time_start
     print(
