@@ -158,7 +158,6 @@ def detect_overfitting_epoch(x):
     """ Detects the maximal average max likelihood of the student. This should be the start of overfitting """
     if len(x) < 6:
         return False
-    return 4
     for i in range(2, len(x) - 2):
         if x[i] > x[i - 1] and x[i] > x[i - 2] and x[i] > x[i + 1] and x[i] > x[i + 2]:
             return i
