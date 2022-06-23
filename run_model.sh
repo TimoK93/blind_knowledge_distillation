@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=code_test
+#SBATCH --job-name=otsu?split
 #SBATCH --mail-user=ehmannlu@tnt.uni-hannover.de
 #SBATCH --mail-type=NONE                # Eine Mail wird bei Job-Start/Ende versendet
 #SBATCH --output=/home/ehmannlu/tmp/TNT_slurm_logs/code_test/%j-train.txt      # Logdatei für den merged STDOUT/STDERR output (%j wird durch slurm job-ID ersetzt)
@@ -8,7 +8,8 @@
 #SBATCH --mem=20G                       # Reservierung von 1 GB RAM Speicher pro Knoten
 #SBATCH --gres=gpu:1                  # Reservierung von einer GPU. Es kann ein bestimmter Typ angefordert werden:
 #SBATCH --time=24:00:00             # Maximale Laufzeit des Jobs, bis Slurm diesen abbricht (HH:MM:SS)
-#SBATCH --array=0-0
+#SBATCH --array=0-24squeue -u ehmannlu
+
 
 export NAME=ehmannlu
 # export CFG_FILE=config/lukas/new_correction_training.yaml
@@ -34,15 +35,19 @@ echo "Start python"
 
 ITER=0
 
-for SEED in 1
+for SEED in 0 # 1 2 3 4
 do
-  if [ $ITER = $SLURM_ARRAY_TASK_ID ]
-  then
-    echo $ITER $CFG_FILE $SEED $NOISE_TYPE $SPLIT_DATASET
-    python ce_baseline_copy.py --noise_type aggre --n_epoch 4 > logs/my_new_log.log
-    python learning.py --noise_type aggre > logs/my_new_log_learning_py.log
-  fi
-  ITER=$(($ITER+1))
+  for NOISE_TYPE in aggre # worst rand1 rand2 rand3
+  do
+    if [ $ITER = $SLURM_ARRAY_TASK_ID ]
+    then
+      echo $SEED $NOISE_TYPE $DATASET
+      python blind_knowledge_dist_training.py --dataset ${DATASET} --noise_type ${NOISE_TYPE} --seed ${SEED} > results/${NOISE_TYPE}_seed_${SEED}/training_log.log
+      python learning.py --dataset ${DATASET} --noise_type ${NOISE_TYPE} --seed ${SEED} > results/${NOISE_TYPE}_seed_${SEED}/learning_log.log
+      python detection.py --dataset ${DATASET} --noise_type ${NOISE_TYPE} --seed ${SEED} > results/${NOISE_TYPE}_seed_${SEED}/detection_log.log
+    fi
+    ITER=$(($ITER+1))
+  done
 done
 
 echo 'done'

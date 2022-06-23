@@ -124,10 +124,10 @@ test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
                                           shuffle=False)
 
 # we will test the model by the following code
-state_dict_teacher = torch.load(f"./{args.dataset}_{args.noise_type}_teacher.pth.tar", map_location = "cpu")
+state_dict_teacher = torch.load(f"./results/{args.dataset}_{args.noise_type}_seed_{args.seed}/teacher.pth.tar", map_location = "cpu")
 teacher.load_state_dict(state_dict_teacher['state_dict'])
 teacher.to(args.device)
-state_dict_student=torch.load(f"./{args.dataset}_{args.noise_type}_student.pth.tar", map_location = "cpu")
+state_dict_student=torch.load(f"./results/{args.dataset}_{args.noise_type}_seed_{args.seed}/student.pth.tar", map_location = "cpu")
 student.load_state_dict(state_dict_teacher['state_dict'])
 student.to(args.device)
 test_acc = evaluate(loader=test_loader, teacher=teacher, student=student, save=False)
