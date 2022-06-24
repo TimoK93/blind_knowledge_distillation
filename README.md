@@ -13,7 +13,7 @@ aims to enhance the knowledge about robust learning with noisy labels and detect
 It is evaluated on the recently published CIFAR-N dataset 
 ([Learning with Noisy Labels Revisited: A Study Using Real-World Human Annotations](https://openreview.net/forum?id=TBWA6PLJZQm&referrer=%5BAuthor%20Console%5D(%2Fgroup%3Fid%3DICLR.cc%2F2022%2FConference%2FAuthors%23your-submissions))).
 
-
+This code is based on the [competitions baseline code](https://github.com/UCSC-REAL/cifar-10-100n/tree/ijcai-lmnl-2022).  
 ## Installation
 
 ---
