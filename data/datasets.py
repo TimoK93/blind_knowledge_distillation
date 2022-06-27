@@ -89,4 +89,6 @@ def input_dataset(dataset, noise_type, noise_path, is_human, val_ratio=0.1):
     val_dataset.train_noisy_labels = (
         np.array(val_dataset.train_noisy_labels)[idx_full[:int(num_training_samples * val_ratio)]]).tolist()
     print(f'Validate with {len(val_dataset.train_noisy_labels)} noisy instances.')
-    return train_dataset, val_dataset, test_dataset, num_classes, num_training_samples
+    # We also return the train_dataset_full to create detection.npy on the breakover point. train_dataset_full is not
+    #   used for training or intermediate evaluation
+    return train_dataset_full, train_dataset, val_dataset, test_dataset, num_classes, num_training_samples

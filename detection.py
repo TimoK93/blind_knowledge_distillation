@@ -9,7 +9,7 @@ import numpy as np
 parser = argparse.ArgumentParser()
 parser.add_argument('--lr', type = float, default = 0.1)
 parser.add_argument('--val_ratio', type = float, default = 0.1)
-parser.add_argument('--noise_type', type = str, help='clean, aggre, worst, rand1, rand2, rand3, clean100, noisy100', default='clean')
+parser.add_argument('--noise_type', type = str, help='clean, aggre, worst, rand1, rand2, rand3, clean100, noisy100', default='worst')
 parser.add_argument('--noise_path', type = str, help='path of CIFAR-10_human.pt', default=None)
 parser.add_argument('--dataset', type = str, help = ' cifar10 or cifar100', default = 'cifar10')
 parser.add_argument('--n_epoch', type=int, default=100)
@@ -45,7 +45,7 @@ if args.noise_path is None:
         raise NameError(f'Undefined dataset {args.dataset}')
 
 
-train_dataset, val_dataset, test_dataset, num_classes, num_training_samples = input_dataset(args.dataset,args.noise_type, args.noise_path, is_human = True, val_ratio = 0.0)
+train_dataset_full, train_dataset, val_dataset, test_dataset, num_classes, num_training_samples = input_dataset(args.dataset,args.noise_type, args.noise_path, is_human = True, val_ratio = 0.0)
 
 YOUR_RESULT = np.load(path)
 noisy_or_not_predict = YOUR_RESULT  # should be your result. N-dim boolean numpy array

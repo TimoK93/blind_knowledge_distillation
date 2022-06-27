@@ -15,7 +15,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--lr', type=float, default=0.02)
 parser.add_argument('--val_ratio', type=float, default=0.0)
 parser.add_argument('--noise_type', type=str, help='clean, aggre, worst, rand1, rand2, rand3, clean100, noisy100',
-                    default='clean')
+                    default='worst')
 parser.add_argument('--noise_path', type=str, help='path of CIFAR-10_human.pt', default=None)
 parser.add_argument('--dataset', type=str, help=' cifar10 or cifar100', default='cifar10')
 parser.add_argument('--n_epoch', type=int, default=300)
@@ -110,6 +110,30 @@ def train(current_epoch, teacher, optimizer, dataloader, student, group_1, group
     mean_max_student_prediction = mean_max_student_prediction / number_of_samples
     return mean_max_student_prediction, prob_teacher_container, prob_student_container, prob_agree_container
 
+
+def calc_noise_probability(teacher, dataloader, student):
+    prob_agree_container = list()
+    teacher.eval()
+    student.eval()
+    with torch.no_grad():
+        for batch_idx, (img, target, index) in enumerate(dataloader):
+            img = img.to(args.device)
+            target = target.to(args.device)
+            pred_teacher = teacher(img)
+            pred_student = student(img)
+
+            prob_student = pred_student.softmax(dim=1)
+            prob_teacher = pred_teacher.softmax(dim=1)
+            prob_agree = prob_teacher * prob_student
+            prob_agree = prob_agree / prob_agree.sum(dim=1, keepdims=True)
+            prob_agree = prob_agree[torch.arange(target.numel()).to(target.device), target]
+            prob_agree_container.append(prob_agree.detach().clone())
+
+    prob_agree_container = torch.cat(prob_agree_container)
+
+    return prob_agree_container
+
+
 def split_dataset(p):
     # Convert logits to probabilities
     up_mean, up_sigma, lo_mean, lo_sigma, thresh = otsu(p)
@@ -147,8 +171,11 @@ def evaluate(loader, teacher, student):
 
 def detect_overfitting_epoch(x):
     """ Detects the maximal average max likelihood of the student. This should be the start of overfitting """
+
     if len(x) < 6:
         return False
+    if len(x) == 10:
+        return 8
     for i in range(2, len(x) - 2):
         if x[i] > x[i - 1] and x[i] > x[i - 2] and x[i] > x[i + 1] and x[i] > x[i + 2]:
             return i
@@ -223,7 +250,7 @@ if args.noise_path is None:
     else:
         raise NameError(f'Undefined dataset {args.dataset}')
 
-train_dataset, val_dataset, test_dataset, n_class, num_training_samples = input_dataset(args.dataset,
+train_dataset_full, train_dataset, val_dataset, test_dataset, n_class, num_training_samples = input_dataset(args.dataset,
                                                                                         args.noise_type,
                                                                                         args.noise_path,
                                                                                         is_human=True,
@@ -239,6 +266,12 @@ optimizer = torch.optim.SGD(list(teacher.parameters()) + list(student.parameters
                             weight_decay=args.weight_decay)
 
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=150, gamma=0.1)
+
+
+train_loader_full = torch.utils.data.DataLoader(dataset=train_dataset_full,  # Is used to create detection.npy. Not used for training or validation!
+                                           batch_size=batch_size,
+                                           num_workers=args.num_workers,
+                                           shuffle=False)
 
 train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
                                            batch_size=batch_size,
@@ -260,6 +293,8 @@ test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
 prob_teacher_hist = list()
 prob_student_hist = list()
 prob_agreement_hist = list()
+# Results for noise detection task
+prob_agreement_hist_DETECTION_TASK = list()
 # Average max likelihood
 avg_max_pred_student_hist = list()
 # Epoch in which overfitting starts
@@ -296,10 +331,15 @@ for epoch in range(args.n_epoch):
             print(f'overfitting epoch: {overfitting_epoch}')
             print('##################################################')
             print()
+            # Split dataset for next step: Robust training
             group_1, group_2, group_3, group_4 = split_dataset(prob_agreement_hist[overfitting_epoch])
-            # save detection.npy
+            # DETECTION TASK: Save un-shuffled full dataset and save detection.npy. After this, the full dataset will not be used again.
+            group_1_full, group_2_full, group_3_full, group_4_full = split_dataset(prob_agreement_hist_DETECTION_TASK[overfitting_epoch])
             save_path_detection = os.path.join(save_path, 'detection.npy')
-            np.save(save_path_detection, group_4.cpu().numpy())
+            np.save(save_path_detection, group_4_full.cpu().numpy())
+        else:
+            full_dataset_noise_probability = calc_noise_probability(teacher, train_loader_full, student)
+            prob_agreement_hist_DETECTION_TASK.append(full_dataset_noise_probability)
 
     # evaluate + save models if new best val_acc
     if epoch % args.noisy_val_freq == 0 or epoch == args.n_epoch - 1:
