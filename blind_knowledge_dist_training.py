@@ -28,10 +28,11 @@ parser.add_argument('--momentum', type=float, default=0.9, help='momentum for SG
 parser.add_argument('--weight_decay', type=float, default=0.0005, help='weight decay for SGD optimizer')
 parser.add_argument('--clean_test_freq', type=int, default=10, help='how often the current model performance on clean data will be displayed')
 parser.add_argument('--noisy_val_freq', type=int, default=10, help='how often the current model performance on noisy data will be displayed')
-parser.add_argument('--alpha1', type=float, default=0.70, help='alpha for group1')
-parser.add_argument('--alpha2', type=float, default=0.55, help='alpha for group2')
-parser.add_argument('--alpha3', type=float, default=0.45, help='alpha for group3')
-parser.add_argument('--alpha4', type=float, default=0.30, help='alpha for group4')
+
+parser.add_argument('--alpha1', type=float, default=0.30, help='alpha for group1 (highest confidence in gt labels)')
+parser.add_argument('--alpha2', type=float, default=0.45, help='alpha for group2 (higher confidence in gt labels)')
+parser.add_argument('--alpha3', type=float, default=0.55, help='alpha for group3 (lower confidence in gt labels)')
+parser.add_argument('--alpha4', type=float, default=0.70, help='alpha for group4 (lowest confidence in gt labels)')
 args = parser.parse_args()
 
 
@@ -112,11 +113,13 @@ def train(current_epoch, teacher, optimizer, dataloader, student, group_1, group
 def split_dataset(p):
     # Convert logits to probabilities
     up_mean, up_sigma, lo_mean, lo_sigma, thresh = otsu(p)
+    print(f'otsu split performed:\n\tup_mean: {up_mean:0.5f}\tup_sigma: {up_sigma:0.5f}\n\tlo_mean: {lo_mean:0.5f}\tlo_sigma: {lo_sigma:0.5f}\n\tthresh:  {thresh:0.5f}\n')
     # Search if we are in overfitting region
-    group_1 = p < lo_mean
-    group_2 = ~group_1 * (p < thresh)
-    group_4 = p >= up_mean
-    group_3 = ~group_4 * (p >= thresh)
+    group_4 = p < lo_mean
+    group_3 = ~group_4 * (p < thresh)
+    group_1 = p >= up_mean
+    group_2 = ~group_1 * (p >= thresh)
+
     return group_1, group_2, group_3, group_4
 
 
@@ -180,10 +183,6 @@ def otsu(p):
 
 
 def save_models(teacher, student):
-    save_path = os.path.join('./results/',
-                                       args.dataset + '_' + args.noise_type + '_seed_' + str(
-                                           args.seed))
-    os.makedirs(save_path_detection, exist_ok=True)
     # save state of teacher
     state_teacher = {'state_dict': teacher.state_dict(),
                      'epoch': epoch
@@ -209,6 +208,8 @@ time_start = time.time()
 # Hyper Parameters
 batch_size = args.batch_size
 learning_rate = args.lr
+save_path = os.path.join('./results/', args.dataset + '_' + args.noise_type + '_seed_' + str(args.seed))
+os.makedirs(save_path, exist_ok=True)
 noise_type_map = {'clean': 'clean_label', 'worst': 'worse_label', 'aggre': 'aggre_label', 'rand1': 'random_label1',
                   'rand2': 'random_label2', 'rand3': 'random_label3', 'clean100': 'clean_label',
                   'noisy100': 'noisy_label'}
@@ -296,12 +297,9 @@ for epoch in range(args.n_epoch):
             print('##################################################')
             print()
             group_1, group_2, group_3, group_4 = split_dataset(prob_agreement_hist[overfitting_epoch])
-            save_path_detection = os.path.join('./results/',
-                                               args.dataset + '_' + args.noise_type + '_seed_' + str(
-                                                   args.seed))
-            os.makedirs(save_path_detection, exist_ok=True)
-            save_path_detection = os.path.join(save_path_detection, 'detection.npy')
-            np.save(save_path_detection, group_1.cpu().numpy())
+            # save detection.npy
+            save_path_detection = os.path.join(save_path, 'detection.npy')
+            np.save(save_path_detection, group_4.cpu().numpy())
 
     # evaluate + save models if new best val_acc
     if epoch % args.noisy_val_freq == 0 or epoch == args.n_epoch - 1:
