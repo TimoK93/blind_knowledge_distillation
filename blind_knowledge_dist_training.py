@@ -66,9 +66,9 @@ def train(current_epoch, teacher, optimizer, dataloader, student, group_1, group
         prob_agree = prob_teacher * prob_student
         prob_agree = prob_agree / prob_agree.sum(dim=1, keepdims=True)
         prob_teacher_container[index], prob_student_container[index], prob_agree_container[index] = \
-            prob_teacher[torch.arange(target.numel()).to(target.device), target].detach(),\
-            prob_student[torch.arange(target.numel()).to(target.device), target].detach(), \
-            prob_agree[torch.arange(target.numel()).to(target.device), target].detach()
+            prob_teacher[torch.arange(target.numel()).to(target.device), target].detach().clone(),\
+            prob_student[torch.arange(target.numel()).to(target.device), target].detach().clone(), \
+            prob_agree[torch.arange(target.numel()).to(target.device), target].detach().clone()
 
         max_student_prediction = prob_student.max(dim=1)[0].detach()
         mean_max_student_prediction += max_student_prediction.sum()
