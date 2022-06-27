@@ -34,6 +34,8 @@ To train and evaluate our framework, run
 export DATASET=cifar10
 export NOISE_TYPE=aggre
 export SEED=42
+mkdir results
+mkdir results/${NOISE_TYPE}_seed_${SEED}
 python blind_knowledge_dist_training.py --dataset ${DATASET} --noise_type ${NOISE_TYPE} --seed ${SEED} > results/${NOISE_TYPE}_seed_${SEED}/training_log.log
 python learning.py --dataset ${DATASET} --noise_type ${NOISE_TYPE} --seed ${SEED} > results/${NOISE_TYPE}_seed_${SEED}/learning_log.log
 python detection.py --dataset ${DATASET} --noise_type ${NOISE_TYPE} --seed ${SEED} > results/${NOISE_TYPE}_seed_${SEED}/detection_log.log
