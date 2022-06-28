@@ -98,6 +98,7 @@ time_start = time.time()
 # Hyper Parameters
 batch_size = 128
 learning_rate = args.lr
+path = f"./results/{args.dataset}_{args.noise_type}_seed_{args.seed}"
 noise_type_map = {'clean':'clean_label', 'worst': 'worse_label', 'aggre': 'aggre_label', 'rand1': 'random_label1', 'rand2': 'random_label2', 'rand3': 'random_label3', 'clean100': 'clean_label', 'noisy100': 'noisy_label'}
 args.noise_type = noise_type_map[args.noise_type]
 # load dataset
@@ -109,7 +110,7 @@ if args.noise_path is None:
     else: 
         raise NameError(f'Undefined dataset {args.dataset}')
 
-_, _, test_dataset, num_classes, num_training_samples = input_dataset(args.dataset,args.noise_type, args.noise_path, is_human = True, val_ratio = args.val_ratio)
+_, _, _, test_dataset, num_classes, num_training_samples = input_dataset(args.dataset,args.noise_type, args.noise_path, is_human = True, val_ratio = args.val_ratio)
 # load model
 print('building model...')
 teacher = PreResNet18(num_classes)
@@ -124,11 +125,14 @@ test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
                                           shuffle=False)
 
 # we will test the model by the following code
-state_dict_teacher = torch.load(f"./results/{args.dataset}_{args.noise_type}_seed_{args.seed}/teacher.pth.tar", map_location = "cpu")
+# loading teacher state
+state_dict_teacher = torch.load(os.path.join(path, "teacher.pth.tar"), map_location="cpu")
 teacher.load_state_dict(state_dict_teacher['state_dict'])
 teacher.to(args.device)
-state_dict_student=torch.load(f"./results/{args.dataset}_{args.noise_type}_seed_{args.seed}/student.pth.tar", map_location = "cpu")
-student.load_state_dict(state_dict_teacher['state_dict'])
+# loading student state
+state_dict_student = torch.load(os.path.join(path, "student.pth.tar"), map_location="cpu")
+student.load_state_dict(state_dict_student['state_dict'])
 student.to(args.device)
+# calculate test acc
 test_acc = evaluate(loader=test_loader, teacher=teacher, student=student, save=False)
 print(f'Best test acc selected by val is {test_acc}')

@@ -13,7 +13,7 @@ import sys
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--lr', type=float, default=0.02)
-parser.add_argument('--val_ratio', type=float, default=0.0)
+parser.add_argument('--val_ratio', type=float, default=0.1)
 parser.add_argument('--noise_type', type=str, help='clean, aggre, worst, rand1, rand2, rand3, clean100, noisy100',
                     default='worst')
 parser.add_argument('--noise_path', type=str, help='path of CIFAR-10_human.pt', default=None)
