@@ -5,9 +5,11 @@ mkdir results/cifar10_aggre_seed_${SEED}
 mkdir results/cifar10_worst_seed_${SEED}
 mkdir results/cifar10_rand1_seed_${SEED}
 
-# training - Please modify with CUDA_VISIBLE_DEVICES and multiprocessing if you have the resources
+# training
+# FIRST TWO RUNS CAN RUN IN PARALLEL ON A RTX2080TI
 nohup python blind_knowledge_dist_training.py --dataset cifar10 --noise_type aggre --seed ${SEED} > results/cifar10_aggre_seed_${SEED}/training.log &
-nohup python blind_knowledge_dist_training.py --dataset cifar10 --noise_type worst --seed ${SEED} > results/cifar10_worst_seed_${SEED}/training.log &
+nohup python blind_knowledge_dist_training.py --dataset cifar10 --noise_type worst --seed ${SEED} > results/cifar10_worst_seed_${SEED}/training.log
+# THIRD RUN - Please modify with CUDA_VISIBLE_DEVICES and multiprocessing if you have the resources. Then you can run all jobs in parallel
 nohup python blind_knowledge_dist_training.py --dataset cifar10 --noise_type rand1 --seed ${SEED} > results/cifar10_rand1_seed_${SEED}/training.log
 
 # eval test_acc with learning.py
