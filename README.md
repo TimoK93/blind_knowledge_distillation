@@ -59,8 +59,9 @@ mkdir results
 mkdir results/${DATASET}_${NOISE_TYPE}_seed_${SEED}
 python blind_knowledge_dist_training.py --val_ratio 0 --dataset ${DATASET} --noise_type ${NOISE_TYPE} --seed ${SEED} > results/${DATASET}_${NOISE_TYPE}_seed_${SEED}/training.log
 python learning.py --dataset ${DATASET} --noise_type ${NOISE_TYPE} --seed ${SEED} > results/${DATASET}_${NOISE_TYPE}_seed_${SEED}/learning.log
-python detection.py --dataset ${DATASET} --noise_type ${NOISE_TYPE} --seed ${SEED} > results/${DATASET}_${NOISE_TYPE}_seed_${SEED}/detection.log
 ````
+
+You can find models and learning results for all challenges [here](https://www.tnt.uni-hannover.de/de/project/MPT/data/NoisyLabelChallenge/NoisyLabelChallenge.zip).
 
 ## Citation
 
