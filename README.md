@@ -48,11 +48,34 @@ to reproduce the results of the *Noisy Labels Challenge*, run
 bash run.sh
 ```
 
+## Official Noisy Labels Leaderboard 
+The [Noisy Label Challenge](http://noisylabels.com/) reports metrics based on runs with other settings in the training shedule. To run our framework with official challenge settings, you only need to set the validation split to 0, e.g. by modifying the above example to
+
+````shell
+export DATASET=cifar10
+export NOISE_TYPE=aggre
+export SEED=42
+mkdir results
+mkdir results/${DATASET}_${NOISE_TYPE}_seed_${SEED}
+python blind_knowledge_dist_training.py --val_ratio 0 --dataset ${DATASET} --noise_type ${NOISE_TYPE} --seed ${SEED} > results/${DATASET}_${NOISE_TYPE}_seed_${SEED}/training.log
+python learning.py --dataset ${DATASET} --noise_type ${NOISE_TYPE} --seed ${SEED} > results/${DATASET}_${NOISE_TYPE}_seed_${SEED}/learning.log
+python detection.py --dataset ${DATASET} --noise_type ${NOISE_TYPE} --seed ${SEED} > results/${DATASET}_${NOISE_TYPE}_seed_${SEED}/detection.log
+````
+
 ## Citation
 
 ---
 If you use our work in your research, please cite our publication:
 
 ```text
-COMING SOON AFTER PUBLICATION!
+@misc{https://doi.org/10.48550/arxiv.2211.11355,
+  doi = {10.48550/ARXIV.2211.11355},
+  url = {https://arxiv.org/abs/2211.11355},
+  author = {Kaiser, Timo and Ehmann, Lukas and Reinders, Christoph and Rosenhahn, Bodo}
+  keywords = {Computer Vision and Pattern Recognition (cs.CV), FOS: Computer and information sciences, FOS: Computer and information sciences},
+  title = {Blind Knowledge Distillation for Robust Image Classification},
+  publisher = {arXiv},
+  year = {2022},
+  copyright = {Creative Commons Attribution 4.0 International}
+}
 ```
