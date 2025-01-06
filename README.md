@@ -7,7 +7,7 @@
 
 
 
-This repository is the official Pytorch implementation of [Blind Knowledge Distillation](Will be added) which is competing 
+This repository is the official Pytorch implementation of [Blind Knowledge Distillation](https://arxiv.org/abs/2211.11355) which is competing 
 on the Noisy Labels Challenge (ICLR2022) [http://www.noisylabels.com/](http://www.noisylabels.com/). This work
 aims to enhance the knowledge about robust learning with noisy labels and detect corrupted training labels. 
 It is evaluated on the recently published CIFAR-N dataset 
